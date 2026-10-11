@@ -1,0 +1,35 @@
+module doan (
+    input  logic       clk,
+    input  logic       rst_n,
+    input  logic       start_btn,
+    output logic       done_led,
+    output logic [3:0] digit_bin,
+    output logic [6:0] seg0,
+    output logic [6:0] seg1
+);
+    logic busy;
+    logic done;
+    logic [3:0] pred_digit;
+
+    cnn_accel_top u_accel (
+        .clk        (clk),
+        .rst_n      (rst_n),
+        .start      (start_btn),
+        .busy       (busy),
+        .done       (done),
+        .pred_digit (pred_digit)
+    );
+
+    assign done_led  = done;
+    assign digit_bin = pred_digit;
+
+    sevenseg u_seg0 (
+        .value(pred_digit),
+        .seg  (seg0)
+    );
+
+    sevenseg u_seg1 (
+        .value(4'd15),
+        .seg  (seg1)
+    );
+endmodule
