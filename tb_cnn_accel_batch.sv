@@ -1,0 +1,124 @@
+`timescale 1ns/1ps
+// tb_cnn_accel_batch.sv  (cho cnn_accel_top ban DE1-SoC co pha S_LOAD)
+// Moi inference: $readmemh nap anh vao image_mem -> reset -> start -> cho done.
+// Chay che do ROM (use_draw=0): pha S_LOAD tu sao image_mem -> img_buf.
+// In: [RESULT] image_D_RR.hex label=D pred=P  (script TCL doc log tinh accuracy).
+//
+//  KHAC ban truoc:
+//   • DUT la cnn_accel_top (co cong use_draw). Dat use_draw=0 -> dung anh ROM.
+//   • Anh nap vao dut.image_mem (khong phai draw_ram) -> khong can draw_ram_sim
+//     cho duong nay, nhung DUT van khoi tao draw_ram nen VAN can 1 stub draw_ram
+//     de elaborate (draw_ram_sim.v).
+module tb_cnn_accel_batch;
+
+    parameter int NUM_IMAGES = 1000;
+
+    logic        clk;
+    logic        rst_n;
+    logic        start;
+    logic        use_draw;
+    logic        busy;
+    logic        done;
+    logic [3:0]  pred_digit;
+
+    cnn_accel_top dut (
+        .clk        (clk),
+        .rst_n      (rst_n),
+        .start      (start),
+        .use_draw   (use_draw),   // 0 = ROM image_mem (anh sach de do accuracy)
+        .busy       (busy),
+        .done       (done),
+        .pred_digit (pred_digit)
+    );
+
+    // Clock 50 MHz
+    initial clk = 1'b0;
+    always #10 clk = ~clk;
+
+    int    digit, rank;
+    string fname;
+    int    label;
+    int    total, correct_count;
+    int    per_digit_total   [0:9];
+    int    per_digit_correct [0:9];
+
+    initial begin
+        use_draw = 1'b0;              // che do ROM: doc anh tu image_mem
+        total = 0;
+        correct_count = 0;
+        for (int d = 0; d < 10; d++) begin
+            per_digit_total[d]   = 0;
+            per_digit_correct[d] = 0;
+        end
+
+        rst_n = 1'b0;
+        start = 1'b0;
+        repeat(10) @(posedge clk);
+        rst_n = 1'b1;
+        repeat(5)  @(posedge clk);
+    
+
+    always @(posedge done)
+      $display("OPT  Conv=%0d Pool=%0d FC=%0d ArgMax=%0d Tong=%0d",
+               o_conv,o_pool,o_fc,o_arg, o_conv+o_pool+o_fc+o_arg);
+        for (digit = 0; digit < 10; digit++) begin
+            for (rank = 0; rank < 100; rank++) begin
+
+                if (rank < 10)
+                    $sformat(fname, "mem/batch/image_%0d_0%0d.hex", digit, rank);
+                else
+                    $sformat(fname, "mem/batch/image_%0d_%0d.hex", digit, rank);
+
+                // Nap anh moi vao image_mem cua DUT (784 pixel)
+                $readmemh(fname, dut.image_mem);
+
+                rst_n = 1'b0;
+                repeat(4) @(posedge clk);
+                rst_n = 1'b1;
+                repeat(2) @(posedge clk);
+
+                start = 1'b1;
+                @(posedge clk);
+                start = 1'b0;
+
+                wait(done == 1'b1);
+                @(posedge clk);
+
+                label = digit;
+                per_digit_total[digit]++;
+                total++;
+                if (pred_digit == label) begin
+                    per_digit_correct[digit]++;
+                    correct_count++;
+                end
+
+                $display("[RESULT] image_%0d_%0d.hex label=%0d pred=%0d %s",
+                    digit, rank, label, pred_digit,
+                    (pred_digit == label) ? "OK" : "WRONG");
+
+                wait(done == 1'b0);
+                repeat(2) @(posedge clk);
+            end
+        end
+
+        $display("");
+        $display("========================================");
+        $display("  RTL SIMULATION ACCURACY REPORT");
+        $display("========================================");
+        $display("  Total images : %0d", total);
+        $display("  Correct      : %0d", correct_count);
+        $display("  Overall acc  : %0.2f%%", 100.0 * correct_count / total);
+        $display("----------------------------------------");
+        $display("  Digit | Total | Correct | Error rate");
+        $display("--------|-------|---------|------------");
+        for (int d = 0; d < 10; d++) begin
+            $display("    %0d   |  %3d  |   %3d   |  %6.2f%%",
+                d, per_digit_total[d], per_digit_correct[d],
+                100.0 * (per_digit_total[d] - per_digit_correct[d]) / per_digit_total[d]);
+        end
+        $display("========================================");
+
+        #100;
+        $finish;
+    end
+endmodule
